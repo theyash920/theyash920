@@ -1,0 +1,49 @@
+# dependencies
+node_modules/
+
+# expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# native
+ios/
+android/
+
+# logs
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# local env files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env*.local
+
+# test
+coverage/
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Other
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
