@@ -47,3 +47,6 @@ Thumbs.db
 *.key
 *.mobileprovision
 *.orig.*
+
+venv
+backend/venv

@@ -41,6 +41,9 @@ export default function RootLayout() {
         <Stack.Screen name="index" />
         <Stack.Screen name="(routes)/onboarding/index" />
         <Stack.Screen name="(routes)/home/index" />
+        <Stack.Screen name="(routes)/recipe-search/index" />
+        <Stack.Screen name="(routes)/recipe-detail/index" />
+        <Stack.Screen name="(routes)/cooking-mode/index" />
       </Stack>
     </ThemeProvider>
   );

@@ -1,8 +1,9 @@
 import OnBoarding1 from "@/assets/svgs/onboarding1";
 import OnBoarding2 from "@/assets/svgs/onboarding2";
 import OnBoarding3 from "@/assets/svgs/onboarding3";
+import { View } from "react-native";
 
-export const onBoardingData:onBoardingDataType[] = [
+export const onBoardingData: onBoardingDataType[] = [
   {
     id: 1,
     title: "Meet Your AI Companion",
@@ -20,5 +21,11 @@ export const onBoardingData:onBoardingDataType[] = [
     title: "Explore your life",
     subtitle: "Tailor the AI experience to fit your unique needs and get personalized responses anytime.",
     image: <OnBoarding3 />,
+  },
+  {
+    id: 4,
+    title: "Your Chef Profile",
+    subtitle: "Tell us your preferences so we can tailor recipes just for you.",
+    image: <View />,
   },
 ];

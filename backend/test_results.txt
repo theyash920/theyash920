@@ -1,0 +1,15 @@
+=== RecipeDB (cosylab.iiitd.edu.in) ===
+  404 | api/search?query=chicken
+  500 | search_recipe?searchText=chicken
+  404 | recipe_search_prepro?searchText=chicken
+  404 | api/recipe/1
+  404 | recipeInfo_json?id=1
+
+=== FlavorDB (cosylab.iiitd.edu.in) ===
+  200 OK | name=Beef Processed | molecules=209
+
+=== Foodoscope API (api.foodoscope.com) ===
+  Root: 200 | Created by Professor Ganesh Bagler
+  Search (x-api-key): 400 | {"url":"/recipe/search?query=chicken&pageSize=1","method":"GET","error":"ApiKey is not provided"}
+  Search (Auth raw): 400 | {"url":"/recipe/search?query=chicken&pageSize=1","method":"GET","error":"ApiKey is not provided"}
+  Search (query param): 400 | {"url":"/recipe/search?query=chicken&pageSize=1&apikey=_zvEaHr1rsw6co_79TOiYBkdmaGh8azcPAol4bSK_pqWnSHY","method":"GET",
