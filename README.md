@@ -1,50 +1,102 @@
-# Welcome to your Expo app 👋
+# 🍳 AI Recipe Assistant - Voice-First Cooking Companion
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+The **AI Recipe Assistant** is a hands-free, voice-controlled cooking companion designed to help you in the kitchen when your hands are full. Powered by **Foodoscope APIs (RecipeDB & FlavorDB)** and **LLMs**, it provides scientifically accurate recipes, step-by-step guidance, and intelligent ingredient substitutions.
 
-## Get started
+---
 
-1. Install dependencies
+## 🚀 Key Features
 
-   ```bash
-   npm install
-   ```
+### 1. 🗣️ Hands-Free Voice Interface
+- **Continuous Conversation**: No need to keep tapping a button. The assistant listens, responds, and waits for your next command.
+- **Step-by-Step Delivery**: Recipes are read out one step at a time ("Ready for the next step?"), ensuring you can follow along without rushing.
+- **Context Awareness**: Remembers your conversation history so you can ask follow-up questions like "Repeat that" or "How much salt?".
 
-2. Start the app
+### 2. 🧪 Scientific Recipe Intelligence (Foodoscope)
+- **RecipeDB Integration**: Fetches verified, cookable recipes from IIIT Delhi's CosyLab database instead of hallucinating random instructions.
+- **FlavorDB Integration**: Uses molecular science to suggest **ingredient substitutions**. If you're missing an item, it checks flavor compound compatibility to offer the best scientific alternative.
 
-   ```bash
-   npx expo start
-   ```
+### 3. 👤 Personalized Chef Profile
+- Learns your preferences during onboarding:
+  - **Dietary Restrictions** (Vegetarian, Gluten-Free, etc.)
+  - **Spice Tolerance** (Mild, Medium, Hot)
+  - **Language** (English / Hindi)
+- The AI adapts every response to your profile.
 
-In the output, you'll find options to open the app in a
+---
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+## 🛠️ Tech Stack
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+### Frontend (Mobile App)
+- **Framework**: React Native (Expo)
+- **Voice**: `expo-av` (Recording), `expo-speech` (TTS)
+- **Navigation**: Expo Router
+- **State**: React Hooks & Context
 
-## Get a fresh project
+### Backend (API)
+- **Framework**: Python FastAPI
+- **AI/LLM**: Groq (Llama-3-70b) or Local Ollama
+- **Speech-to-Text**: Whisper (OpenAI or Local)
+- **Data Sources**: 
+  - **RecipeDB API** (Search & Details)
+  - **FlavorDB API** (Molecular Flavor Profiles)
 
-When you're ready, run:
+---
 
+## 🔧 Installation & Setup
+
+### Prerequisites
+- Node.js & npm
+- Python 3.9+
+- Expo Go app on your phone (or Android Emulator)
+
+### 1. Clone the Repository
 ```bash
-npm run reset-project
+git clone https://github.com/yourusername/ai-recipe-assistant.git
+cd ai-recipe-assistant
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+### 2. Backend Setup
+Navigate to the backend folder and install dependencies:
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
 
-## Learn more
+Create a `.env` file in the root directory with your keys:
+```env
+EXPO_PUBLIC_GROQ_API_KEY=your_groq_key
+EXPO_PUBLIC_FORK_API_KEY=your_foodoscope_key
+EXPO_PUBLIC_BACKEND_URL=http://YOUR_LOCAL_IP:8000
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+Run the server:
+```bash
+python main.py
+```
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+### 3. Frontend Setup
+In a new terminal, go to the project root:
+```bash
+npm install
+npx expo start
+```
+Scan the QR code with your phone to run the app!
 
-## Join the community
+---
 
-Join our community of developers creating universal apps.
+## 📸 Demo
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+*(Add screenshots or a link to your demo video here)*
+
+---
+
+## 🏆 Hackathon Tracks
+- **Foodoscope API Integration**: Uses RecipeDB for search and FlavorDB for scientific substitutions.
+- **Voice UI**: Completely hands-free operation.
+- **Personalization**: Custom dietary and spice profiles.
+
+---
+
+Built with ❤️ by [Your Name] using **CosyLab APIs @ IIIT Delhi**.
