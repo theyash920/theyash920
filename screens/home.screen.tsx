@@ -1,4 +1,4 @@
-import { FontAwesome, FontAwesome5, MaterialIcons } from "@expo/vector-icons";
+import { FontAwesome, FontAwesome5, Ionicons, MaterialIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios from "axios";
 import { Audio } from "expo-av";
@@ -19,6 +19,8 @@ import {
 } from "react-native";
 import { scale, verticalScale } from "react-native-size-matters";
 
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || "http://10.0.2.2:8000";
+
 export default function HomeScreen() {
   const [isRecording, setIsRecording] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -28,6 +30,8 @@ export default function HomeScreen() {
   const [chatHistory, setChatHistory] = useState<{ role: string; content: string }[]>([]);
   const lottieRef = useRef<LottieView>(null);
   const chatScrollRef = useRef<ScrollView>(null);
+  const [nutritionData, setNutritionData] = useState<any>(null);
+  const [nutritionLoading, setNutritionLoading] = useState(false);
 
   useEffect(() => {
     if (AISpeaking) {
@@ -219,6 +223,42 @@ export default function HomeScreen() {
     setAISpeaking(false);
     setLoading(false);
     setChatHistory([]);
+    setNutritionData(null);
+  };
+
+  const fetchNutrition = async (messageContent: string) => {
+    // Try to extract recipe name from the AI's message
+    // Look for text after "Recipe Name:" or "**" bold markers or first line
+    let recipeName = "";
+    const boldMatch = messageContent.match(/\*\*([^*]+)\*\*/);
+    const recipeNameMatch = messageContent.match(/Recipe Name:\s*(.+)/i);
+    if (recipeNameMatch) {
+      recipeName = recipeNameMatch[1].trim();
+    } else if (boldMatch) {
+      recipeName = boldMatch[1].trim();
+    } else {
+      // Use first line
+      recipeName = messageContent.split("\n")[0].substring(0, 60).trim();
+    }
+
+    if (!recipeName) return;
+
+    setNutritionLoading(true);
+    try {
+      const response = await axios.get(`${BACKEND_URL}/nutrition`, {
+        params: { query: recipeName },
+      });
+      setNutritionData(response.data);
+    } catch (error) {
+      console.log("Nutrition fetch error:", error);
+      // Show a fallback message in chat
+      setChatHistory((prev) => [
+        ...prev,
+        { role: "assistant", content: `⚠️ Could not find nutrition data for "${recipeName}" in RecipeDB.` },
+      ]);
+    } finally {
+      setNutritionLoading(false);
+    }
   };
 
   // ─── Render ───────────────────────────────────────────────────────────
@@ -328,26 +368,79 @@ export default function HomeScreen() {
         )}
 
         {chatHistory.map((msg, idx) => (
-          <View
-            key={idx}
-            style={[
-              styles.chatBubble,
-              msg.role === "user" ? styles.userBubble : styles.aiBubble,
-            ]}
-          >
-            <View style={styles.bubbleHeader}>
-              {msg.role === "user" ? (
-                <FontAwesome name="user" size={scale(11)} color="#6C63FF" />
-              ) : (
-                <FontAwesome5 name="robot" size={scale(11)} color="#00b894" />
-              )}
-              <Text style={styles.bubbleRole}>
-                {msg.role === "user" ? "You" : "AI Chef"}
-              </Text>
+          <View key={idx}>
+            <View
+              style={[
+                styles.chatBubble,
+                msg.role === "user" ? styles.userBubble : styles.aiBubble,
+              ]}
+            >
+              <View style={styles.bubbleHeader}>
+                {msg.role === "user" ? (
+                  <FontAwesome name="user" size={scale(11)} color="#6C63FF" />
+                ) : (
+                  <FontAwesome5 name="robot" size={scale(11)} color="#00b894" />
+                )}
+                <Text style={styles.bubbleRole}>
+                  {msg.role === "user" ? "You" : "AI Chef"}
+                </Text>
+              </View>
+              <Text style={styles.bubbleText}>{msg.content}</Text>
             </View>
-            <Text style={styles.bubbleText}>{msg.content}</Text>
+
+            {/* Nutrition button — shown after AI messages */}
+            {msg.role === "assistant" && !msg.content.startsWith("⚠️") && (
+              <TouchableOpacity
+                style={styles.nutritionBtn}
+                onPress={() => fetchNutrition(msg.content)}
+                disabled={nutritionLoading}
+              >
+                <Ionicons name="nutrition" size={scale(14)} color="#00b894" />
+                <Text style={styles.nutritionBtnText}>
+                  {nutritionLoading ? "Loading…" : "🥗 Nutrition Info"}
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         ))}
+
+        {/* Nutrition Card */}
+        {nutritionData && (
+          <View style={styles.nutritionCard}>
+            <View style={styles.nutritionCardHeader}>
+              <Ionicons name="nutrition" size={scale(18)} color="#00b894" />
+              <Text style={styles.nutritionCardTitle}>
+                {nutritionData.recipe_title}
+              </Text>
+              <TouchableOpacity onPress={() => setNutritionData(null)}>
+                <MaterialIcons name="close" size={scale(18)} color="#aaa" />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.nutritionCardSubtitle}>
+              Per Serving • {nutritionData.source === "estimated" ? "⚡ AI Estimated" : "via RecipeDB"}
+            </Text>
+            <View style={styles.nutritionGrid}>
+              {[
+                { label: "Calories", value: nutritionData.nutrition.calories, unit: "kcal", color: "#FF6B6B" },
+                { label: "Protein", value: nutritionData.nutrition.protein, unit: "g", color: "#6C63FF" },
+                { label: "Fat", value: nutritionData.nutrition.total_fat, unit: "g", color: "#FDCB6E" },
+                { label: "Carbs", value: nutritionData.nutrition.carbohydrates, unit: "g", color: "#00b894" },
+                { label: "Fiber", value: nutritionData.nutrition.fiber, unit: "g", color: "#74b9ff" },
+                { label: "Sugar", value: nutritionData.nutrition.sugar, unit: "g", color: "#fd79a8" },
+                { label: "Sodium", value: nutritionData.nutrition.sodium, unit: "mg", color: "#a29bfe" },
+                { label: "Cholesterol", value: nutritionData.nutrition.cholesterol, unit: "mg", color: "#ffeaa7" },
+              ].map((item) => (
+                <View key={item.label} style={styles.nutritionGridItem}>
+                  <Text style={[styles.nutritionValue, { color: item.color }]}>
+                    {item.value !== "N/A" ? `${parseFloat(String(item.value)).toFixed(1)}` : "—"}
+                  </Text>
+                  <Text style={styles.nutritionUnit}>{item.unit}</Text>
+                  <Text style={styles.nutritionLabel}>{item.label}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
 
         {loading && (
           <View style={[styles.chatBubble, styles.aiBubble]}>
@@ -600,5 +693,85 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,107,107,0.3)",
     padding: scale(6),
     borderRadius: scale(12),
+  },
+
+  // Nutrition button
+  nutritionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: scale(5),
+    backgroundColor: "rgba(0,184,148,0.12)",
+    paddingVertical: verticalScale(5),
+    paddingHorizontal: scale(12),
+    borderRadius: scale(14),
+    marginBottom: verticalScale(10),
+    marginTop: verticalScale(-4),
+    borderWidth: 1,
+    borderColor: "rgba(0,184,148,0.25)",
+  },
+  nutritionBtnText: {
+    color: "#00b894",
+    fontSize: scale(11),
+    fontFamily: "SegoeUI",
+    fontWeight: "600",
+  },
+
+  // Nutrition card
+  nutritionCard: {
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderRadius: scale(16),
+    padding: scale(16),
+    marginBottom: verticalScale(12),
+    borderWidth: 1,
+    borderColor: "rgba(0,184,148,0.2)",
+  },
+  nutritionCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: scale(8),
+    marginBottom: verticalScale(4),
+  },
+  nutritionCardTitle: {
+    flex: 1,
+    color: "#fff",
+    fontSize: scale(15),
+    fontFamily: "SegoeUI",
+    fontWeight: "bold",
+  },
+  nutritionCardSubtitle: {
+    color: "#888",
+    fontSize: scale(10),
+    fontFamily: "SegoeUI",
+    marginBottom: verticalScale(12),
+  },
+  nutritionGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    gap: scale(6),
+  },
+  nutritionGridItem: {
+    width: "23%",
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderRadius: scale(10),
+    paddingVertical: verticalScale(10),
+    alignItems: "center",
+  },
+  nutritionValue: {
+    fontSize: scale(15),
+    fontWeight: "bold",
+    fontFamily: "SegoeUI",
+  },
+  nutritionUnit: {
+    color: "#999",
+    fontSize: scale(9),
+    fontFamily: "SegoeUI",
+  },
+  nutritionLabel: {
+    color: "#bbb",
+    fontSize: scale(9),
+    fontFamily: "SegoeUI",
+    marginTop: verticalScale(2),
   },
 });

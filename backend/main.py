@@ -1,7 +1,7 @@
 """
 AI Recipe Assistant — FastAPI Backend
-Connects RecipeDB, FlavorDB, Ollama (local LLM), and image search services.
-Uses Ollama with Llama 3.1 8B for AI chat instead of cloud APIs.
+100% Local AI — Connects RecipeDB, FlavorDB, Ollama (local LLM), and
+faster-whisper (local STT). No cloud API keys needed for AI.
 """
 
 import os
@@ -13,21 +13,27 @@ from fastapi import FastAPI, HTTPException, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import tempfile
+from faster_whisper import WhisperModel
 
 # Load environment variables from project root .env
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 FORK_API_KEY = os.getenv("EXPO_PUBLIC_FORK_API_KEY")
-GROQ_API_KEY = os.getenv("EXPO_PUBLIC_GROQ_API_KEY")  # Kept only for Whisper STT
 # Correct Foodoscope API base URL (NOT cosylab.iiitd.edu.in which returns 404s)
 FOODOSCOPE_API_BASE = "https://api.foodoscope.com/api"
 FLAVORDB_BASE = "https://cosylab.iiitd.edu.in/flavordb"
 
 # Ollama local configuration
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:latest")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
 
-app = FastAPI(title="AI Recipe Assistant", version="1.0.0")
+# Local Whisper model for speech-to-text (loads once at startup)
+WHISPER_MODEL_SIZE = os.getenv("WHISPER_MODEL_SIZE", "base")
+print(f"🎤 Loading Whisper model ({WHISPER_MODEL_SIZE})... this may take a moment on first run.")
+whisper_model = WhisperModel(WHISPER_MODEL_SIZE, device="cpu", compute_type="int8")
+print(f"✅ Whisper model loaded successfully!")
+
+app = FastAPI(title="AI Recipe Assistant", version="2.0.0")
 
 # Allow all origins for Expo development
 app.add_middleware(
@@ -53,7 +59,7 @@ class ChatResponse(BaseModel):
 
 # ─── Helper: Ollama Chat ─────────────────────────────────────────────────────
 
-def ollama_chat(messages: list, temperature: float = 0.7) -> str:
+def ollama_chat(messages: list, temperature: float = 0.5) -> str:
     """Send a chat request to the local Ollama server and return the response text."""
     url = f"{OLLAMA_BASE_URL}/api/chat"
     payload = {
@@ -62,7 +68,9 @@ def ollama_chat(messages: list, temperature: float = 0.7) -> str:
         "stream": False,
         "options": {
             "temperature": temperature,
-            "num_predict": 300,  # equivalent to max_tokens
+            "num_predict": 120,  # keep answers short and pin-point
+            "repeat_penalty": 1.3,  # discourage repetition/rambling
+            "top_p": 0.85,
         },
     }
     try:
@@ -456,8 +464,8 @@ def health():
     return {
         "status": "ok" if ollama_ok else "degraded",
         "ollama": {"connected": ollama_ok, "models": models, "active_model": OLLAMA_MODEL},
+        "whisper": {"model": WHISPER_MODEL_SIZE, "loaded": whisper_model is not None},
         "foodoscope_key": bool(FORK_API_KEY),
-        "groq_key_for_whisper": bool(GROQ_API_KEY),
     }
 
 
@@ -580,49 +588,125 @@ def get_flavor(ingredient_id: int):
     raise HTTPException(status_code=404, detail=f"Flavor data not found for ingredient {ingredient_id}")
 
 
+@app.get("/nutrition")
+def get_nutrition(query: str = Query(..., min_length=1)):
+    """
+    Search RecipeDB for a recipe by name and return its full nutrition data.
+    Falls back to LLM estimation if no DB match found.
+    """
+    recipe_title = query
+    nutrition = {}
+    recipe_id = None
+    source = "recipedb"
+
+    # Try Foodoscope API first
+    results = search_recipes_api(query, page=1)
+    if results and len(results) > 0:
+        recipe = results[0] if isinstance(results, list) else results
+        recipe_id = recipe.get("recipe_id", recipe.get("id"))
+        recipe_title = recipe.get("recipe_title", recipe.get("title", query))
+
+        if recipe_id:
+            full_recipe = fetch_recipe(recipe_id)
+            if full_recipe:
+                raw_n = full_recipe.get("nutritional_info", full_recipe.get("nutrition", {}))
+                if isinstance(raw_n, dict):
+                    nutrition = raw_n
+                recipe_title = full_recipe.get("recipe_title", full_recipe.get("title", recipe_title))
+
+        if not nutrition:
+            nutrition = recipe.get("nutritional_info", recipe.get("nutrition", {}))
+
+    # Fallback to sample recipes
+    if not nutrition:
+        query_lower = query.lower()
+        for r in SAMPLE_RECIPES:
+            if query_lower in r["title"].lower() or query_lower in r.get("cuisine", "").lower():
+                recipe_title = r["title"]
+                recipe_id = r["id"]
+                nutrition = r.get("nutrition", {})
+                source = "sample"
+                break
+
+    # Fallback to LLM estimation
+    if not nutrition:
+        source = "estimated"
+        print(f"[Nutrition] No DB data for '{query}', using LLM estimation")
+        prompt = f"""Give approximate nutrition values per serving for "{query}".
+Reply ONLY with a JSON object, no extra text:
+{{"calories":0,"protein":0,"total_fat":0,"carbohydrates":0,"fiber":0,"sugar":0,"sodium":0,"cholesterol":0}}
+Use realistic numeric values. No units, just numbers."""
+        try:
+            llm_response = ollama_chat(
+                [{"role": "user", "content": prompt}],
+                temperature=0.3,
+            )
+            # Extract JSON from the response
+            import re
+            json_match = re.search(r'\{[^}]+\}', llm_response)
+            if json_match:
+                nutrition = json.loads(json_match.group())
+                recipe_title = query
+            else:
+                print(f"[Nutrition] LLM did not return valid JSON: {llm_response[:200]}")
+        except Exception as e:
+            print(f"[Nutrition] LLM estimation failed: {e}")
+
+    if not nutrition:
+        raise HTTPException(status_code=404, detail=f"No nutrition data found for '{query}'")
+
+    def nval(n, *keys):
+        """Get first non-None value from nutrition dict using multiple key names."""
+        for k in keys:
+            v = n.get(k)
+            if v is not None:
+                return v
+        return "N/A"
+
+    return {
+        "recipe_title": recipe_title,
+        "recipe_id": recipe_id,
+        "source": source,
+        "nutrition": {
+            "calories": nval(nutrition, "calories", "energy"),
+            "protein": nval(nutrition, "protein"),
+            "total_fat": nval(nutrition, "total_fat", "fat", "totalFat"),
+            "carbohydrates": nval(nutrition, "carbohydrates", "carbs", "total_carbohydrates"),
+            "fiber": nval(nutrition, "fiber", "dietary_fiber", "dietaryFiber"),
+            "sugar": nval(nutrition, "sugar", "total_sugar", "totalSugar"),
+            "sodium": nval(nutrition, "sodium"),
+            "cholesterol": nval(nutrition, "cholesterol"),
+        },
+    }
+
+
 @app.post("/transcribe")
 async def transcribe_audio(file: UploadFile = File(...)):
     """
-    Transcribe audio to text using Groq Whisper API.
-    This endpoint is used by the mobile app to send recorded audio for speech-to-text.
-    (Ollama does not support speech-to-text, so Groq Whisper is used for this purpose only.)
+    Transcribe audio to text using local faster-whisper model.
+    Fully offline — no cloud API needed.
     """
-    if not GROQ_API_KEY:
-        raise HTTPException(status_code=500, detail="Groq API key not configured for Whisper transcription")
-
     try:
         # Read the uploaded file
         audio_data = await file.read()
 
-        # Save to a temp file
+        # Save to a temp file (faster-whisper needs a file path)
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp.write(audio_data)
             tmp_path = tmp.name
 
         try:
-            # Send to Groq Whisper
-            with open(tmp_path, "rb") as audio_file:
-                resp = requests.post(
-                    "https://api.groq.com/openai/v1/audio/transcriptions",
-                    headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-                    files={"file": ("recording.wav", audio_file, "audio/wav")},
-                    data={"model": "whisper-large-v3-turbo"},
-                    timeout=30,
-                )
-
-            if resp.status_code == 200:
-                transcript = resp.json().get("text", "")
-                print(f"[Whisper] Transcribed: {transcript[:100]}...")
-                return {"text": transcript}
-            else:
-                print(f"[Whisper] Error: {resp.status_code} — {resp.text[:200]}")
-                raise HTTPException(status_code=502, detail=f"Whisper API error: {resp.text[:200]}")
+            # Transcribe with local Whisper model
+            print(f"[Whisper] Transcribing audio ({len(audio_data)} bytes)...")
+            segments, info = whisper_model.transcribe(tmp_path, beam_size=5)
+            transcript = " ".join([segment.text.strip() for segment in segments])
+            print(f"[Whisper] Language: {info.language} (prob: {info.language_probability:.2f})")
+            print(f"[Whisper] Transcribed: {transcript[:100]}...")
+            return {"text": transcript, "language": info.language}
         finally:
             # Clean up temp file
             os.unlink(tmp_path)
 
-    except HTTPException:
-        raise
     except Exception as e:
         print(f"[Whisper] Exception: {e}")
         raise HTTPException(status_code=500, detail=f"Transcription error: {str(e)}")
@@ -704,12 +788,12 @@ INGREDIENTS IN THIS RECIPE:
 
 {flavor_context}
 
-INSTRUCTIONS:
-- Respond naturally and helpfully as a cooking guide.
-- Keep responses concise (2-4 sentences) since they will be spoken aloud via TTS.
-- If the user asks about substitutions, use the FlavorDB data to give scientifically grounded advice.
-- Consider the user's dietary restrictions and spice tolerance.
-- If the user mentions a specific step, refer to it in your response.
+STRICT RULES:
+- Answer in 1-2 sentences MAX. Never more.
+- Be direct and specific. No filler, no intros, no "Great question!" type phrases.
+- This is a voice assistant — every word counts.
+- If asked about a substitution, give ONE substitute with a brief reason.
+- Respect dietary restrictions and spice tolerance.
 - Respond in {'Hindi' if language.lower() == 'hindi' else 'English'}.
 """
     else:
@@ -724,27 +808,22 @@ INSTRUCTIONS:
             else:
                 print("[Chat] No Foodoscope results, LLM will generate from knowledge")
 
-        system_prompt = f"""You are an AI Recipe Assistant and cooking companion powered by Foodoscope (RecipeDB & FlavorDB). Follow these rules strictly:
+        system_prompt = f"""You are a concise AI Recipe Assistant. your goal is to help user cook step-by-step.
 
-1. STEP-BY-STEP DELIVERY: When sharing a recipe, NEVER give all steps at once. Give ONLY ONE step at a time. After each step, ask "Ready for the next step?" and WAIT for the user to confirm.
-2. RECIPE FORMAT: First tell the recipe name and a brief description. Then list the ingredients. Then say "Let's start cooking! Here's step 1:" and give only the first step.
-3. CONCISE: Keep each response short (2-3 sentences max). This is a voice assistant so brevity is key.
-4. FRIENDLY: Be warm, encouraging, and conversational.
-5. SMART: For substitution questions, ingredient queries, and cooking tips, answer directly and concisely.
-6. If the user says "next", "continue", "yes", "go ahead", "okay", or similar, give ONLY the next step.
-7. If the user asks your name, say you are the AI Recipe Assistant powered by Foodoscope.
-8. IMPORTANT: When recipe data from RecipeDB is provided below, USE it in your response instead of generating recipes from your own knowledge.
+STRICT INSTRUCTIONS:
+1. STEP-BY-STEP DELIVERY: When sharing a recipe, NEVER give all steps at once. Give ONLY ONE step at a time.
+2. After giving a step, ask "Ready for the next step?" and WAIT for the user to say "yes"/"next".
+3. If the user says "next", "continue", "yes", "go ahead", "okay", give ONLY the next step.
+4. RECIPE START: First tell the recipe name and ingredients. Then say "Let's start! Here's step 1:" and give ONLY step 1.
+5. CONCISE: Keep each response short (2 sentences max). No filler words.
 
-USER PROFILE:
-- Dietary Restrictions: {dietary}
-- Spice Tolerance: {spice}
-- Language Preference: {language}
+USER PROFILE (Follow STRICTLY):
+- Diet: {dietary} (Do not suggest forbidden foods)
+- Spice Level: {spice} (Adjust recipes accordingly)
+- Language: {language} (Respond in this language)
 
 {foodoscope_context}
-
 {flavor_context}
-
-Respond in {'Hindi' if language.lower() == 'hindi' else 'English'}.
 """
 
     # Build messages array
@@ -790,8 +869,8 @@ def visual_checkpoint(query: str = Query(..., min_length=1)):
 
 if __name__ == "__main__":
     import uvicorn
-    print(f"🚀 Starting AI Recipe Assistant API")
+    print(f"🚀 Starting AI Recipe Assistant API (100% Local AI)")
     print(f"🤖 LLM: Ollama ({OLLAMA_MODEL}) at {OLLAMA_BASE_URL}")
+    print(f"🎤 STT: Whisper ({WHISPER_MODEL_SIZE}) — local")
     print(f"🔑 Foodoscope API Key: {'✅ Set' if FORK_API_KEY else '❌ Not set'}")
-    print(f"🎤 Groq Whisper Key: {'✅ Set' if GROQ_API_KEY else '❌ Not set'}")
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
